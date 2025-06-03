@@ -416,6 +416,9 @@ fork(void)
 //lab3
 // Create a child thread sharing address space with parent.
 // Stack points to user stack for the thread.
+
+// 在 kernel/proc.c 中的 clone 函数修正版本
+// 在 kernel/proc.c 中的 clone 函数最终修正版本
 int
 clone(void *stack)
 {
@@ -473,12 +476,16 @@ clone(void *stack)
     return -1;
   }
 
-  *(np->trapframe) = *(p->trapframe);
+  // 关键修正：完全复制父进程的 trapframe
+  memmove(np->trapframe, p->trapframe, sizeof(struct trapframe));
 
+  // 设置子线程的栈指针
   np->trapframe->sp = (uint64)stack;
 
+  // 关键修正：子线程从 clone 系统调用返回 0
   np->trapframe->a0 = 0;
 
+  // 不复制文件描述符（根据假设）
   for(i = 0; i < NOFILE; i++)
     np->ofile[i] = 0;
   
@@ -498,11 +505,15 @@ clone(void *stack)
   np->state = RUNNABLE;
   release(&np->lock);
 
-  printf("clone: child thread %d created, epc=%p, sp=%p, a0=%d\n", 
-       np->pid, np->trapframe->epc, np->trapframe->sp, np->trapframe->a0);
+  printf("clone: created thread %d, epc=%p, sp=%p, a0=%d\n", 
+         np->pid, np->trapframe->epc, np->trapframe->sp, np->trapframe->a0);
 
   return pid;
 }
+
+
+
+
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
 void
@@ -709,6 +720,8 @@ forkret(void)
   struct proc *p = myproc();
   if(p->thread_id > 0) {
     p->trapframe->a0 = 0;
+    printf("forkret: thread %d setting a0=0, epc=%p, sp=%p\n", 
+           p->thread_id, p->trapframe->epc, p->trapframe->sp);
   }
 
   usertrapret();

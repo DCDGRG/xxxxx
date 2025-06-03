@@ -86,6 +86,12 @@ usertrap(void)
 //
 // return to user space
 //
+// 在 kernel/trap.c 中的 usertrapret 函数
+
+
+
+
+// 在 kernel/trap.c 中的 usertrapret 函数
 void
 usertrapret(void)
 {
@@ -127,12 +133,24 @@ usertrapret(void)
   // and switches to user mode with sret.
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
   
+  // 关键修正：确保线程的 a0 寄存器正确
+  if(p->thread_id > 0) {
+    p->trapframe->a0 = 0;
+    printf("usertrapret: thread %d, final epc=%p, sp=%p, a0=%d\n", 
+           p->thread_id, p->trapframe->epc, p->trapframe->sp, p->trapframe->a0);
+  }
+  
   if(p->thread_id == 0){
     ((void (*)(uint64,uint64))trampoline_userret)(TRAPFRAME, satp);
   } else {
-    ((void (*)(uint64,uint64))trampoline_userret)(TRAPFRAME - PGSIZE * p->thread_id, satp);
+    uint64 trapframe_addr = TRAPFRAME - PGSIZE * p->thread_id;
+    ((void (*)(uint64,uint64))trampoline_userret)(trapframe_addr, satp);
   }
 }
+
+
+
+
 
 // interrupts and exceptions from kernel code go here via kernelvec,
 // on whatever the current kernel stack is.

@@ -1,3 +1,4 @@
+// user/thread.c
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
@@ -11,7 +12,8 @@ int thread_create(void *(start_routine)(void*), void *arg)
     return -1;
     
   // Stack grows downward, so point to the top
-  stack = (char*)stack + 4096;
+  // Leave some space for safety
+  stack = (char*)stack + 4096 - 64;
   
   printf("thread_create: before clone, stack=%p\n", stack);  // Debug
   
@@ -21,19 +23,20 @@ int thread_create(void *(start_routine)(void*), void *arg)
   
   if(pid < 0){
     // Free the stack on failure
-    free((char*)stack - 4096);
+    free((char*)stack - 4096 + 64);
     return -1;
   }
   
   if(pid == 0){
     // Child thread - execute the start routine
+    printf("thread_create: I am child thread!\n");  // Debug
     start_routine(arg);
     exit(0);
   }
   
   // Parent returns the PID of the child thread
   printf("thread_create: in parent, returning %d\n", pid);  // Debug
-  return pid;
+  return 0;  // 根据规范，父进程应该返回0表示成功
 }
 
 void lock_init(struct lock_t* lock)
