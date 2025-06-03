@@ -90,6 +90,10 @@ void
 usertrapret(void)
 {
   struct proc *p = myproc();
+  if(p == 0 || p->trapframe == 0) {
+    panic("usertrapret: bad proc");
+  }
+
 
   // we're about to switch the destination of traps from
   // kerneltrap() to usertrap(), so turn off interrupts until
@@ -126,7 +130,12 @@ usertrapret(void)
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64))trampoline_userret)(satp);
+  
+  if(p->thread_id == 0){
+    ((void (*)(uint64,uint64))trampoline_userret)(TRAPFRAME, satp);
+  } else {
+    ((void (*)(uint64,uint64))trampoline_userret)(TRAPFRAME - PGSIZE * p->thread_id, satp);
+  }
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,

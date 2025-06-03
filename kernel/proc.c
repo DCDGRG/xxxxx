@@ -124,6 +124,7 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->thread_id = 0;  // Initialize as parent process
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -149,17 +150,90 @@ found:
   return p;
 }
 
+//lab3
+// Look in the process table for an UNUSED proc for thread.
+// If found, initialize state required to run in the kernel,
+// and return with p->lock held.
+// If there are no free procs, or a memory allocation fails, return 0.
+// kernel/proc.c
+static struct proc*
+allocproc_thread(void)
+{
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if(p->state == UNUSED) {
+      goto found;
+    } else {
+      release(&p->lock);
+    }
+  }
+  return 0;
+
+found:
+  p->pid = allocpid();
+  p->state = USED;
+  
+  // 初始化 kstack - 这很重要！
+  p->kstack = KSTACK((int) (p - proc));
+  
+  // Initialize thread_id to 0
+  p->thread_id = 0;
+
+  // Allocate a trapframe page.
+  if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+    p->state = UNUSED;
+    release(&p->lock);
+    return 0;
+  }
+
+  // 重要：清零 trapframe
+  memset(p->trapframe, 0, PGSIZE);
+
+  // Initialize all fields
+  p->pagetable = 0;  // Will be set by clone
+  p->sz = 0;         // Will be set by clone
+  p->parent = 0;     // Will be set by clone
+  p->cwd = 0;
+  p->killed = 0;
+  p->xstate = 0;
+  p->chan = 0;
+  
+  // Clear file descriptors
+  for(int i = 0; i < NOFILE; i++)
+    p->ofile[i] = 0;
+
+  // Set up new context to start executing at forkret,
+  // which returns to user space.
+  memset(&p->context, 0, sizeof(p->context));
+  p->context.ra = (uint64)forkret;
+  p->context.sp = p->kstack + PGSIZE;
+
+  memset(p->name, 0, sizeof(p->name));
+
+  return p;
+}
+
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
 static void
 freeproc(struct proc *p)
 {
-  if(p->trapframe)
+  if(p->trapframe){
+    // If this is a thread, unmap its trapframe from user space
+    if(p->thread_id > 0){
+      uvmunmap(p->pagetable, TRAPFRAME - PGSIZE * p->thread_id, 1, 0);
+    }
     kfree((void*)p->trapframe);
+  }
   p->trapframe = 0;
-  if(p->pagetable)
+  
+  // Only free page table if this is not a thread
+  if(p->thread_id == 0 && p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+    
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -169,6 +243,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->thread_id = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -325,6 +400,112 @@ fork(void)
   return pid;
 }
 
+//lab3
+// Create a child thread sharing address space with parent.
+// Stack points to user stack for the thread.
+int
+clone(void *stack)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *p = myproc();
+
+  // 调试语句 1：在函数开始处添加
+  printf("clone: starting, stack=%p\n", stack);
+
+  // Basic sanity check
+  if(stack == 0){
+    printf("clone: stack is NULL\n");  // 额外的调试信息
+    return -1;
+  }
+
+  // Allocate process (thread).
+  if((np = allocproc_thread()) == 0){
+    printf("clone: allocproc_thread failed\n");  // 额外的调试信息
+    return -1;
+  }
+
+  // Share the parent's page table
+  np->pagetable = p->pagetable;
+  np->sz = p->sz;
+
+  // Initialize thread_id to 0 first
+  np->thread_id = 0;
+  
+  // Find an available thread ID
+  for(i = 1; i <= 20; i++){
+    int found = 0;
+    struct proc *pp;
+    for(pp = proc; pp < &proc[NPROC]; pp++){
+      if(pp != np && pp->parent == p && pp->thread_id == i){
+        found = 1;
+        break;
+      }
+    }
+    if(!found){
+      np->thread_id = i;
+      break;
+    }
+  }
+
+  // If no thread ID available, fail
+  if(np->thread_id == 0){
+    printf("clone: no thread_id available\n");  // 额外的调试信息
+    kfree((void*)np->trapframe);
+    np->trapframe = 0;
+    np->state = UNUSED;
+    release(&np->lock);
+    return -1;
+  }
+
+  // 调试语句 2：在映射 trapframe 之前添加
+  printf("clone: mapping trapframe for thread_id=%d at addr=%p\n", 
+         np->thread_id, TRAPFRAME - PGSIZE * np->thread_id);
+
+  // Map thread's trapframe to user space
+  if(mappages(np->pagetable, TRAPFRAME - PGSIZE * np->thread_id, PGSIZE,
+              (uint64)(np->trapframe), PTE_R | PTE_W) < 0){
+    printf("clone: mappages failed\n");  // 额外的调试信息
+    kfree((void*)np->trapframe);
+    np->trapframe = 0;
+    np->state = UNUSED;
+    release(&np->lock);
+    return -1;
+  }
+
+  // 继续函数的其余部分...
+  // copy saved user registers.
+  *(np->trapframe) = *(p->trapframe);
+
+  // Set thread's user stack
+  np->trapframe->sp = (uint64)stack;
+
+  // Cause clone to return 0 in the child.
+  np->trapframe->a0 = 0;
+
+  // Initialize file descriptors to NULL
+  for(i = 0; i < NOFILE; i++)
+    np->ofile[i] = 0;
+  np->cwd = 0;
+
+  safestrcpy(np->name, p->name, sizeof(p->name));
+
+  pid = np->pid;
+
+  printf("clone: success, returning pid=%d\n", pid);  // 额外的调试信息
+
+  release(&np->lock);
+
+  acquire(&wait_lock);
+  np->parent = p;
+  release(&wait_lock);
+
+  acquire(&np->lock);
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  return pid;
+}
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
 void
