@@ -13,7 +13,12 @@ int thread_create(void *(start_routine)(void*), void *arg)
   // Stack grows downward, so point to the top
   stack = (char*)stack + 4096;
   
+  printf("thread_create: before clone, stack=%p\n", stack);  // Debug
+  
   int pid = clone(stack);
+  
+  printf("thread_create: after clone, pid=%d\n", pid);  // Debug
+  
   if(pid < 0){
     // Free the stack on failure
     free((char*)stack - 4096);
@@ -21,13 +26,14 @@ int thread_create(void *(start_routine)(void*), void *arg)
   }
   
   if(pid == 0){
-    // Child thread
+    // Child thread - execute the start routine
     start_routine(arg);
     exit(0);
   }
   
-  // Parent returns 0 on success
-  return 0;
+  // Parent returns the PID of the child thread
+  printf("thread_create: in parent, returning %d\n", pid);  // Debug
+  return pid;
 }
 
 void lock_init(struct lock_t* lock)

@@ -90,10 +90,6 @@ void
 usertrapret(void)
 {
   struct proc *p = myproc();
-  if(p == 0 || p->trapframe == 0) {
-    panic("usertrapret: bad proc");
-  }
-
 
   // we're about to switch the destination of traps from
   // kerneltrap() to usertrap(), so turn off interrupts until

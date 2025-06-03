@@ -24,6 +24,11 @@ void* thread_fn(void *arg)
     lock_release(&lock);
     sleep(0); // Yield to potentially allow other threads to run
   }
+
+   for (int i = 0; i < n_threads; i++) {
+    int status;
+    wait(&status);
+  }
   return 0;
 }
 

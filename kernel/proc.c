@@ -204,8 +204,7 @@ found:
   for(int i = 0; i < NOFILE; i++)
     p->ofile[i] = 0;
 
-  // Set up new context to start executing at forkret,
-  // which returns to user space.
+  // 关键：设置 context 以便从 forkret 开始执行
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
@@ -214,6 +213,9 @@ found:
 
   return p;
 }
+
+
+
 
 // free a proc structure and the data hanging from it,
 // including user pages.
@@ -406,6 +408,11 @@ fork(void)
   return pid;
 }
 
+
+
+
+
+
 //lab3
 // Create a child thread sharing address space with parent.
 // Stack points to user stack for the thread.
@@ -431,7 +438,7 @@ clone(void *stack)
   np->sz = p->sz;
 
   // Find an available thread ID
-  np->thread_id = 0;  // Initialize to 0 first
+  np->thread_id = 0;
   for(i = 1; i <= 20; i++){
     int found = 0;
     struct proc *pp;
@@ -466,20 +473,15 @@ clone(void *stack)
     return -1;
   }
 
-  // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
-  // Set thread's user stack
   np->trapframe->sp = (uint64)stack;
 
-  // Cause clone to return 0 in the child.
   np->trapframe->a0 = 0;
 
-  // Initialize file descriptors to NULL (threads don't share file descriptors)
   for(i = 0; i < NOFILE; i++)
     np->ofile[i] = 0;
   
-  // Copy current working directory
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
@@ -495,6 +497,9 @@ clone(void *stack)
   acquire(&np->lock);
   np->state = RUNNABLE;
   release(&np->lock);
+
+  printf("clone: child thread %d created, epc=%p, sp=%p, a0=%d\n", 
+       np->pid, np->trapframe->epc, np->trapframe->sp, np->trapframe->a0);
 
   return pid;
 }
@@ -698,6 +703,12 @@ forkret(void)
     // be run from main().
     first = 0;
     fsinit(ROOTDEV);
+  }
+
+   // 如果是线程，确保返回值是 0
+  struct proc *p = myproc();
+  if(p->thread_id > 0) {
+    p->trapframe->a0 = 0;
   }
 
   usertrapret();
