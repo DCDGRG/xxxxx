@@ -223,7 +223,7 @@ freeproc(struct proc *p)
 {
   if(p->trapframe){
     // If this is a thread, unmap its trapframe from user space
-    if(p->thread_id > 0){
+    if(p->thread_id > 0 && p->pagetable){
       uvmunmap(p->pagetable, TRAPFRAME - PGSIZE * p->thread_id, 1, 0);
     }
     kfree((void*)p->trapframe);
@@ -244,6 +244,12 @@ freeproc(struct proc *p)
   p->xstate = 0;
   p->state = UNUSED;
   p->thread_id = 0;
+  
+  // Clear cwd
+  if(p->cwd){
+    iput(p->cwd);
+    p->cwd = 0;
+  }
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -410,18 +416,13 @@ clone(void *stack)
   struct proc *np;
   struct proc *p = myproc();
 
-  // 调试语句 1：在函数开始处添加
-  printf("clone: starting, stack=%p\n", stack);
-
   // Basic sanity check
   if(stack == 0){
-    printf("clone: stack is NULL\n");  // 额外的调试信息
     return -1;
   }
 
   // Allocate process (thread).
   if((np = allocproc_thread()) == 0){
-    printf("clone: allocproc_thread failed\n");  // 额外的调试信息
     return -1;
   }
 
@@ -429,10 +430,8 @@ clone(void *stack)
   np->pagetable = p->pagetable;
   np->sz = p->sz;
 
-  // Initialize thread_id to 0 first
-  np->thread_id = 0;
-  
   // Find an available thread ID
+  np->thread_id = 0;  // Initialize to 0 first
   for(i = 1; i <= 20; i++){
     int found = 0;
     struct proc *pp;
@@ -450,22 +449,16 @@ clone(void *stack)
 
   // If no thread ID available, fail
   if(np->thread_id == 0){
-    printf("clone: no thread_id available\n");  // 额外的调试信息
     kfree((void*)np->trapframe);
     np->trapframe = 0;
     np->state = UNUSED;
     release(&np->lock);
     return -1;
   }
-
-  // 调试语句 2：在映射 trapframe 之前添加
-  printf("clone: mapping trapframe for thread_id=%d at addr=%p\n", 
-         np->thread_id, TRAPFRAME - PGSIZE * np->thread_id);
 
   // Map thread's trapframe to user space
   if(mappages(np->pagetable, TRAPFRAME - PGSIZE * np->thread_id, PGSIZE,
               (uint64)(np->trapframe), PTE_R | PTE_W) < 0){
-    printf("clone: mappages failed\n");  // 额外的调试信息
     kfree((void*)np->trapframe);
     np->trapframe = 0;
     np->state = UNUSED;
@@ -473,7 +466,6 @@ clone(void *stack)
     return -1;
   }
 
-  // 继续函数的其余部分...
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -483,16 +475,16 @@ clone(void *stack)
   // Cause clone to return 0 in the child.
   np->trapframe->a0 = 0;
 
-  // Initialize file descriptors to NULL
+  // Initialize file descriptors to NULL (threads don't share file descriptors)
   for(i = 0; i < NOFILE; i++)
     np->ofile[i] = 0;
-  np->cwd = 0;
+  
+  // Copy current working directory
+  np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
-
-  printf("clone: success, returning pid=%d\n", pid);  // 额外的调试信息
 
   release(&np->lock);
 

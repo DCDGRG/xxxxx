@@ -5,7 +5,7 @@
 
 int thread_create(void *(start_routine)(void*), void *arg)
 {
-  // Use 4096 instead of PGSIZE in user space.
+  // Allocate stack
   void *stack = malloc(4096);
   if(stack == 0)
     return -1;
@@ -15,6 +15,7 @@ int thread_create(void *(start_routine)(void*), void *arg)
   
   int pid = clone(stack);
   if(pid < 0){
+    // Free the stack on failure
     free((char*)stack - 4096);
     return -1;
   }
@@ -25,7 +26,7 @@ int thread_create(void *(start_routine)(void*), void *arg)
     exit(0);
   }
   
-  // Parent
+  // Parent returns 0 on success
   return 0;
 }
 
